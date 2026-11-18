@@ -1,8 +1,8 @@
 package main
 
 import (
+	"fmt"
 	"net/http"
-	"io"
 	"time"
 	"log"
 )
@@ -10,10 +10,15 @@ import (
 func main() {
 	mux := http.NewServeMux()
 
-	mux.Handle("/", http.FileServer(http.Dir(".")))
+	mux.Handle("/app/", http.StripPrefix("/app", http.FileServer(http.Dir("."))))
 
-	mux.HandleFunc("/hello", func(w http.ResponseWriter, req *http.Request) {
-		io.WriteString(w, "request allowed\n")
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, req *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, err := w.Write([]byte("OK"))
+		if err != nil {
+			fmt.Printf("could not write the response header: %w", err)
+		}
 	})
 
 	srv := http.Server{
