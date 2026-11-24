@@ -6,6 +6,7 @@ import (
 	"time"
 	"log"
 	"sync/atomic"
+	"encoding/json"
 )
 
 type apiConfig struct {
@@ -20,9 +21,14 @@ func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
 }
 
 func (cfg *apiConfig) handlerMetrics(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Hits", "text/plain; charset=utf-8")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(fmt.Sprintf("Hits: %v", cfg.fileserverHits.Load())))
+	_, _ = w.Write([]byte(fmt.Sprintf("<html>"+
+			"<body>" +
+				"<h1>Welcome, Chirpy Admin</h1>" +
+				"<p>Chirpy has been visited %d times!</p>" +
+			"</body>" +
+		"</html>", cfg.fileserverHits.Load())))
 }
 
 func (cfg *apiConfig) handlerReset(w http.ResponseWriter, r *http.Request) {
@@ -38,6 +44,71 @@ func (cfg *apiConfig) handlerHealthz(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte("OK"))
 }
 
+func (cfg *apiConfig) handlerValidate(w http.ResponseWriter, r *http.Request) {
+	type message struct{
+		Body string `json:"body"`
+	}
+	
+	decoder := json.NewDecoder(r.Body)
+	msg := message{}
+	err := decoder.Decode(&msg)
+	if err != nil {
+		log.Printf("Error decoding parameters: %s", err)
+		w.WriteHeader(500)
+		return
+	}
+
+	bodyLength := len(msg.Body)
+
+	if bodyLength > 140 {
+		respondWithError(w, 400, "Chirp is too long")
+	} else {
+		respondWithJSON(w, 200)
+	}
+}
+
+func respondWithError(w http.ResponseWriter, code int, msg string) {
+	type returnErr struct {
+		Msg string `json:"error"`
+	}
+
+	respBody := returnErr{
+		Msg: msg,
+	}
+
+	data, err := json.Marshal(respBody) 
+	if err != nil {
+		log.Printf("Error marshalling JSON: %s", err)
+		w.WriteHeader(500)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	w.Write(data)
+}
+
+func respondWithJSON(w http.ResponseWriter, code int) {
+	type returnVal struct {
+		IsValid bool `json:"valid"`
+	}
+
+	respBody := returnVal{
+		IsValid: true,
+	}
+
+	data, err := json.Marshal(respBody)
+	if err != nil {
+		log.Printf("Error marshalling JSON: %s", err)
+		w.WriteHeader(500)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	w.Write(data)
+}
+
 func main() {
 	var apiCfg apiConfig
 	mux := http.NewServeMux()
@@ -45,9 +116,10 @@ func main() {
 
 	mux.Handle("/app/", http.StripPrefix("/app", apiCfg.middlewareMetricsInc(handler)))
 	
-	mux.HandleFunc("/metrics", apiCfg.handlerMetrics)
-	mux.HandleFunc("/reset", apiCfg.handlerReset)
-	mux.HandleFunc("/healthz", apiCfg.handlerHealthz)
+	mux.HandleFunc("GET  /admin/metrics", 		apiCfg.handlerMetrics)
+	mux.HandleFunc("POST /admin/reset",   		apiCfg.handlerReset)
+	mux.HandleFunc("GET  /api/healthz", 		apiCfg.handlerHealthz)
+	mux.HandleFunc("POST /api/validate_chirp", 	apiCfg.handlerValidate)
 
 	srv := http.Server{
 		Addr:         ":8080",
